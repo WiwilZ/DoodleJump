@@ -1,10 +1,10 @@
 import math
+import random
+import sys
 
 import pygame
 from pygame.locals import *
 from pygame.math import Vector2
-import random
-import sys
 
 WIDTH, HEIGHT = 600, 800
 pygame.init()
@@ -12,37 +12,44 @@ display_surface = pygame.display.set_mode((WIDTH, HEIGHT), pygame.DOUBLEBUF, vsy
 pygame.display.set_caption("Doodle Jump")
 
 
-class Background:
-    def draw(self, display_surface):
-        display_surface.fill((255, 250, 240))
-        for i in range(0, WIDTH, 14):
-            pygame.draw.line(display_surface, (240, 230, 140), (i, 0), (i, HEIGHT))
-        for i in range(0, HEIGHT, 14):
-            pygame.draw.line(display_surface, (240, 230, 140), (0, i), (WIDTH, i))
+class Entity:
+    def __init__(self, surf: pygame.Surface):
+        self.surf = surf
+        self.rect = self.surf.get_rect()
+
+    def draw(self, screen: pygame.Surface):
+        screen.blit(self.surf, self.rect)
 
     def update(self):
         pass
 
 
-class Player:
+class Background(Entity):
+    def __init__(self):
+        surf = pygame.Surface((WIDTH, HEIGHT))
+        surf.fill((255, 250, 240))
+        for i in range(0, WIDTH, 14):
+            pygame.draw.line(surf, (240, 230, 140), (i, 0), (i, HEIGHT))
+        for i in range(0, HEIGHT, 14):
+            pygame.draw.line(surf, (240, 230, 140), (0, i), (WIDTH, i))
+        super().__init__(surf)
+
+
+class Player(Entity):
     images = [pygame.image.load(f"assets/player/{name}.png").convert_alpha() for name in
               ('idle_left', 'idle_right', 'jump_left', 'jump_right')]
     width, height = images[0].get_size()
     ACC = Vector2(0, 0.6)
-    INITIAL_Y_VEL = 13
+    INITIAL_SPEED_Y = 13
 
-    def __init__(self, pos):
+    def __init__(self, pos: Vector2):
+        super().__init__(self.images[0])
         self.pos = pos
-        self.vel = Vector2(0, -self.INITIAL_Y_VEL)
+        self.vel = Vector2(0, -self.INITIAL_SPEED_Y)
         self.direction = 0
-        self.surf = self.images[0]
-        self.rect = self.surf.get_rect()
-        self.rect.midbottom = self.pos  # 把锚点设为中下点
         self.level = 0
         self.stay = False
-
-    def draw(self, display_surface):
-        display_surface.blit(self.surf, self.rect)
+        self.rect.midbottom = self.pos  # 把锚点设为中下点
 
     def update(self):
         pressed_keys = pygame.key.get_pressed()
@@ -71,35 +78,19 @@ class Player:
         self.stay = False
 
 
-class Platform:
+class Platform(Entity):
     images = [pygame.image.load(f"assets/platform/{name}.png").convert_alpha() for name in
               ('green', 'blue', 'red', 'broken')]
     width, height = images[0].get_size()
 
-    def __init__(self, pos, level):
+    def __init__(self, pos: Vector2, type: int, level: int):
+        super().__init__(self.images[type])
         self.pos = pos
-        self.rect = self.surf.get_rect()
-        self.rect.midtop = self.pos  # 把锚点设为中上点
+        self.type = type
         self.level = level
-
-    def draw(self, display_surface):
-        display_surface.blit(self.surf, self.rect)
-
-    def update(self):
-        self.rect.midtop = self.pos
-
-
-class GreenPlatform(Platform):
-    def __init__(self, pos, level):
-        self.surf = self.images[0]
-        super().__init__(pos, level)
-
-
-class BluePlatform(Platform):
-    def __init__(self, pos, level):
-        self.surf = self.images[1]
-        super().__init__(pos, level)
-        self.speed = 8
+        self.speed = 8 if type == 1 else 0
+        self.is_broken = False  # for red
+        self.rect.midtop = self.pos  # 把锚点设为中上点
 
     def update(self):
         if not (self.width / 2 < self.pos.x < WIDTH - self.width / 2):
@@ -107,32 +98,21 @@ class BluePlatform(Platform):
         self.pos.x += self.speed
         self.rect.midtop = self.pos
 
-
-class RedPlatform(Platform):
-    def __init__(self, pos, level):
-        self.is_broken = False
-        self.surf = self.images[2]
-        super().__init__(pos, level)
-
     def set_broken(self):
         self.is_broken = True
         self.surf = self.images[3]
         self.rect = self.surf.get_rect()
 
 
-class Spring:
+class Spring(Entity):
     images = [pygame.image.load(f"assets/spring/{name}.png").convert_alpha() for name in ('idle', 'released')]
     width, height = images[0].get_size()
 
-    def __init__(self, pos):
+    def __init__(self, pos: Vector2):
+        super().__init__(self.images[0])
         self.is_released = False
         self.pos = pos
-        self.surf = self.images[0]
-        self.rect = self.surf.get_rect()
         self.rect.midbottom = self.pos  # 把锚点设为中下点
-
-    def draw(self, display_surface):
-        display_surface.blit(self.surf, self.rect)
 
     def update(self):
         self.rect.midbottom = self.pos
@@ -160,9 +140,11 @@ class Game:
 
     def add_platform_and_spring(self, y):
         x = random.uniform(math.ceil(Platform.width / 2), math.floor(WIDTH - Platform.width / 2))
-        platform_type = random.choice([GreenPlatform] * 6 + [BluePlatform] * 3 + [RedPlatform])
-        self.platforms.append(platform_type(Vector2(x, y), self.platform_level))
-        if platform_type == GreenPlatform and random.randint(1, 5) == 1:
+        # 绿、蓝、红按6 : 3 : 1的概率生成平台
+        platform_type = random.choice([0] * 6 + [1] * 3 + [2])
+        self.platforms.append(Platform(Vector2(x, y), platform_type, self.platform_level))
+        # 绿色平台 1/5 概率生成弹簧
+        if platform_type == 0 and random.randint(1, 5) == 1:
             self.springs.append(Spring(Vector2(x + (Platform.width - Spring.width) / 2 * random.uniform(-1, 1), y + 2)))
         self.platform_level += 1
 
@@ -171,11 +153,11 @@ class Game:
         for platform in self.platforms:
             if self.player.vel.y > 0 and abs(self.player.pos.y - platform.pos.y) < 10 and abs(
                     self.player.pos.x - platform.pos.x) < (Player.width + Platform.width) / 2:
-                if isinstance(platform, RedPlatform):
+                if platform.type == 2:  # red
                     if platform.is_broken:
                         continue
                     platform.set_broken()
-                self.player.vel.y = -Player.INITIAL_Y_VEL
+                self.player.vel.y = -Player.INITIAL_SPEED_Y
                 self.level += max(platform.level - self.player.level, 0)
                 self.player.pos.y = platform.pos.y
                 self.player.level = max(platform.level, self.player.level)
@@ -185,12 +167,14 @@ class Game:
         for spring in self.springs:
             if self.player.vel.y >= 0 and abs(self.player.pos.y - spring.rect.top) < 10 and abs(
                     self.player.pos.x - spring.pos.x) < (Player.width + Spring.width) / 2 and not spring.is_released:
-                self.player.vel.y = -Player.INITIAL_Y_VEL * 1.5
+                self.player.vel.y = -Player.INITIAL_SPEED_Y * 1.5
                 spring.set_released()
 
     def run(self):
         self.reset()
-        self.platforms.append(GreenPlatform(Vector2(self.player.pos), 0))
+        # 第一个平台位于角色出生位置
+        self.platforms.append(Platform(Vector2(self.player.pos), 0, 0))
+        # 生成上面的平台
         for y in range(int(self.player.pos.y - 60), 0, -60):
             self.add_platform_and_spring(y)
 
