@@ -1,3 +1,5 @@
+import math
+
 import pygame
 from pygame.locals import *
 from pygame.math import Vector2
@@ -23,12 +25,12 @@ class Background:
 
 
 class Player:
-    images = [pygame.image.load(f"assets/player_{name}.png").convert_alpha() for name in
-              ('left', 'right', 'left_jump', 'right_jump')]
+    images = [pygame.image.load(f"assets/player/{name}.png").convert_alpha() for name in
+              ('idle_left', 'idle_right', 'jump_left', 'jump_right')]
     width, height = images[0].get_size()
     ACC = Vector2(0, 0.6)
     INITIAL_Y_VEL = 13
-    
+
     def __init__(self, pos):
         self.pos = pos
         self.vel = Vector2(0, -self.INITIAL_Y_VEL)
@@ -70,8 +72,8 @@ class Player:
 
 
 class Platform:
-    images = [pygame.image.load(f"assets/platform_{name}.png").convert_alpha() for name in
-              ('green', 'blue', 'red', 'red_break')]
+    images = [pygame.image.load(f"assets/platform/{name}.png").convert_alpha() for name in
+              ('green', 'blue', 'red', 'broken')]
     width, height = images[0].get_size()
 
     def __init__(self, pos, level):
@@ -97,30 +99,29 @@ class BluePlatform(Platform):
     def __init__(self, pos, level):
         self.surf = self.images[1]
         super().__init__(pos, level)
-        self.vel = Vector2(8, 0)
+        self.speed = 8
 
     def update(self):
-        if not (self.width / 2 <= self.pos.x <= WIDTH - self.width / 2):
-            self.vel.x = -self.vel.x
-        self.pos += self.vel
+        if not (self.width / 2 < self.pos.x < WIDTH - self.width / 2):
+            self.speed = -self.speed
+        self.pos.x += self.speed
         self.rect.midtop = self.pos
 
 
 class RedPlatform(Platform):
     def __init__(self, pos, level):
+        self.is_broken = False
         self.surf = self.images[2]
         super().__init__(pos, level)
 
     def set_broken(self):
+        self.is_broken = True
         self.surf = self.images[3]
         self.rect = self.surf.get_rect()
 
 
 class Spring:
-    images = [
-        pygame.image.load("assets/spring.png").convert_alpha(),
-        pygame.image.load("assets/spring_bounce.png").convert_alpha(),
-    ]
+    images = [pygame.image.load(f"assets/spring/{name}.png").convert_alpha() for name in ('idle', 'released')]
     width, height = images[0].get_size()
 
     def __init__(self, pos):
@@ -145,50 +146,51 @@ class Spring:
 class Game:
     FPS = 60
     MAX_SPEED = 2.0
+
     def __init__(self):
         self.clock = pygame.time.Clock()
         self.background = Background()
-        self.player = None
+
+    def reset(self):
+        self.level = 0
+        self.platform_level = 1
+        self.player = Player(Vector2(WIDTH / 2, HEIGHT - 50))
         self.springs = []
         self.platforms = []
-        self.level = 0
-        self.platformLevel = 1
 
     def add_platform_and_spring(self, y):
-        x = random.uniform(Platform.width // 2, WIDTH - Platform.width // 2)
-        p = random.choice([GreenPlatform] * 6 + [BluePlatform] * 3 + [RedPlatform])
-        self.platforms.append(p(Vector2(x, y), self.platformLevel))
-        if p == GreenPlatform and random.randint(1, 5) == 1:
+        x = random.uniform(math.ceil(Platform.width / 2), math.floor(WIDTH - Platform.width / 2))
+        platform_type = random.choice([GreenPlatform] * 6 + [BluePlatform] * 3 + [RedPlatform])
+        self.platforms.append(platform_type(Vector2(x, y), self.platform_level))
+        if platform_type == GreenPlatform and random.randint(1, 5) == 1:
             self.springs.append(Spring(Vector2(x + (Platform.width - Spring.width) / 2 * random.uniform(-1, 1), y + 2)))
-        self.platformLevel += 1
-        
+        self.platform_level += 1
+
     def detect_collision(self):
         # 与平台碰撞
         for platform in self.platforms:
-            if self.player.vel.y >= 0 and abs(self.player.pos.y - platform.pos.y) < 5 and abs(
+            if self.player.vel.y > 0 and abs(self.player.pos.y - platform.pos.y) < 10 and abs(
                     self.player.pos.x - platform.pos.x) < (Player.width + Platform.width) / 2:
                 if isinstance(platform, RedPlatform):
+                    if platform.is_broken:
+                        continue
                     platform.set_broken()
-                else:
-                    self.player.vel.y = -Player.INITIAL_Y_VEL
-                    self.level += max(platform.level - self.player.level, 0)
-                    self.player.pos.y = platform.pos.y
-                    self.player.level = max(platform.level, self.player.level)
-                    self.player.stay = True
+                self.player.vel.y = -Player.INITIAL_Y_VEL
+                self.level += max(platform.level - self.player.level, 0)
+                self.player.pos.y = platform.pos.y
+                self.player.level = max(platform.level, self.player.level)
+                self.player.stay = True
 
         # 与弹簧碰撞
         for spring in self.springs:
-            if self.player.vel.y >= 0 and abs(self.player.pos.y - spring.rect.top) < 5 and abs(
+            if self.player.vel.y >= 0 and abs(self.player.pos.y - spring.rect.top) < 10 and abs(
                     self.player.pos.x - spring.pos.x) < (Player.width + Spring.width) / 2 and not spring.is_released:
                 self.player.vel.y = -Player.INITIAL_Y_VEL * 1.5
                 spring.set_released()
 
     def run(self):
-        self.level = 0
-        self.platformLevel = 1
-        self.player = Player(Vector2(WIDTH / 2, HEIGHT - 50))
-        self.springs = []
-        self.platforms = [GreenPlatform(Vector2(self.player.pos), 0)]
+        self.reset()
+        self.platforms.append(GreenPlatform(Vector2(self.player.pos), 0))
         for y in range(int(self.player.pos.y - 60), 0, -60):
             self.add_platform_and_spring(y)
 
@@ -204,7 +206,6 @@ class Game:
 
             self.detect_collision()
 
-
             # 角色靠近上面立刻刷新平台
             if self.player.pos.y - 120 <= 0 and self.player.stay:
                 for e in self.platforms + self.springs:
@@ -212,7 +213,7 @@ class Game:
                 self.player.pos.y += HEIGHT - 120
                 for y in range(int(self.player.pos.y - 120), 0, -60):
                     self.add_platform_and_spring(y)
-                
+
             # 平台下落
             val = min(self.level * 0.01, self.MAX_SPEED)
             for e in self.platforms + self.springs:
@@ -229,7 +230,7 @@ class Game:
             y = self.platforms[-1].pos.y - 60
             if y >= 0:
                 self.add_platform_and_spring(y)
-    
+
             # 玩家掉出屏幕重新开始
             if self.player.rect.top > HEIGHT:
                 pygame.init()
