@@ -51,7 +51,7 @@ class Background(Entity):
 class Player(Entity):
     images = [load_image(f"player/{name}") for name in ('idle_left', 'idle_right', 'jump_left', 'jump_right')]
     width, height = images[0].get_size()
-    ACC = Vector2(0, 0.6)
+    ACC = Vector2(0, 0.7)
     INITIAL_SPEED_Y = 15
 
     def __init__(self, pos: Vector2):
@@ -94,20 +94,48 @@ class Platform(Entity):
     images = [load_image(f"platform/{name}") for name in ('green', 'blue', 'red', 'broken')]
     width, height = images[0].get_size()
 
+    '''type: 0: green 1: blue 2: red 3: green with spring'''
+
     def __init__(self, pos: Vector2, type: int, level: int):
-        super().__init__(self.images[type])
+        super().__init__(self.images[type % 3])
         self.pos = pos
         self.type = type
         self.level = level
         self.speed = 8 if type == 1 else 0
+        if type == 3:
+            self.spring = Spring(pos + Vector2((Platform.width - Spring.width) / 2 * random.uniform(-1, 1), 0))
         self.is_broken = False  # for red
         self.rect.midtop = self.pos  # 把锚点设为中上点
+
+    def draw(self, screen: pygame.Surface):
+        super().draw(screen)
+        if self.type == 3:
+            self.spring.draw(screen)
 
     def update(self):
         if not (self.width / 2 < self.pos.x < WIDTH - self.width / 2):
             self.speed = -self.speed
         self.pos.x += self.speed
         self.rect.midtop = self.pos
+        if self.type == 3:
+            self.spring.update()
+
+    def is_collide_with(self, player: Player):
+        if self.type == 2:
+            if self.is_broken:
+                return False
+        elif self.type == 3:
+            if (not self.spring.is_released
+                    and abs(player.pos.x - self.spring.pos.x) < (Player.width + Spring.width) / 2
+                    and abs(player.rect.bottom - self.spring.rect.top) < 10):
+                return True
+        return (abs(player.pos.x - self.pos.x) < (Player.width + Platform.width) / 2
+                and abs(player.rect.bottom - self.rect.top) < 10)
+
+    def drop(self, delta):
+        self.pos.y += delta
+        if self.type == 3:
+            self.spring.pos.y += delta
 
     def set_broken(self):
         self.is_broken = True
@@ -147,42 +175,34 @@ class Game:
         self.level = 0
         self.platform_level = 1
         self.player = Player(Vector2(WIDTH / 2, HEIGHT - 50))
-        self.springs = []
         self.platforms = []
 
-    def add_platform_and_spring(self, y: float):
+    def add_platform(self, y: float):
         x = random.uniform(math.ceil(Platform.width / 2), math.floor(WIDTH - Platform.width / 2))
-        # 绿、蓝、红按6 : 3 : 1的概率生成平台
-        platform_type = random.choice([0] * 6 + [1] * 3 + [2])
+        # 绿、蓝、红、弹簧按10 : 4 : 3 : 2的概率生成平台
+        platform_type = random.choice([0] * 10 + [1] * 4 + [2] * 3 + [3] * 2)
         self.platforms.append(Platform(Vector2(x, y), platform_type, self.platform_level))
-        # 绿色平台 1/5 概率生成弹簧
-        if platform_type == 0 and random.randint(1, 5) == 1:
-            self.springs.append(Spring(Vector2(x + (Platform.width - Spring.width) / 2 * random.uniform(-1, 1), y)))
         self.platform_level += 1
 
     def detect_collision(self):
-        # 与平台碰撞
         for platform in self.platforms:
-            if self.player.vel.y > 0 and abs(self.player.pos.y - platform.pos.y) < 10 and abs(
-                    self.player.pos.x - platform.pos.x) < (Player.width + Platform.width) / 2:
-                if platform.type == 2:  # red
+            if self.player.vel.y > 0 and platform.is_collide_with(self.player):
+                if platform.type == 2:
                     if platform.is_broken:
                         continue
                     platform.set_broken()
+                elif platform.type == 3:
+                    if not platform.spring.is_released:
+                        self.player.vel.y = -Player.INITIAL_SPEED_Y * 1.4
+                        platform.spring.set_released()
+                        pygame.mixer.Sound.play(high_jump_sound)
+                        continue
                 self.player.vel.y = -Player.INITIAL_SPEED_Y
                 self.level += max(platform.level - self.player.level, 0)
                 self.player.pos.y = platform.pos.y
                 self.player.level = max(platform.level, self.player.level)
                 self.player.stay = True
                 pygame.mixer.Sound.play(jump_sound)
-
-        # 与弹簧碰撞
-        for spring in self.springs:
-            if self.player.vel.y >= 0 and abs(self.player.pos.y - spring.rect.top) < 10 and abs(
-                    self.player.pos.x - spring.pos.x) < (Player.width + Spring.width) / 2 and not spring.is_released:
-                self.player.vel.y = -Player.INITIAL_SPEED_Y * 1.5
-                spring.set_released()
-                pygame.mixer.Sound.play(high_jump_sound)
 
     def run(self):
         self.reset()
@@ -195,7 +215,7 @@ class Game:
 
         # 生成上面的平台
         for y in range(int(self.player.pos.y - 60), 0, -60):
-            self.add_platform_and_spring(y)
+            self.add_platform(y)
 
         while True:
             for event in pygame.event.get():
@@ -203,7 +223,7 @@ class Game:
                     pygame.quit()
                     sys.exit()
 
-            for e in chain((self.background, self.player), self.platforms, self.springs):
+            for e in chain((self.background, self.player), self.platforms):
                 e.update()
                 e.draw(display_surface)
 
@@ -213,31 +233,26 @@ class Game:
             self.detect_collision()
 
             # 角色靠近上面立刻刷新平台
-            if self.player.pos.y - 400 <= 0:
-                c = ((400 - self.player.pos.y) / 400)  # 距离屏幕上方越近就越靠近1
-                up_val = 20  # 额外下落的值
-                for e in self.platforms + self.springs:
-                    e.pos.y += c * up_val
-                self.player.pos.y += c * up_val
+            if self.player.pos.y <= 400:
+                delta = ((400 - self.player.pos.y) / 400) * 20
+                for platform in self.platforms:
+                    platform.drop(delta)
+                self.player.pos.y += delta
 
             # 平台下落
-            val = min(self.level * self.SPEED_UP, self.MAX_SPEED)
-            for e in chain(self.platforms, self.springs):
-                e.pos.y += val
+            delta = min(self.level * self.SPEED_UP, self.MAX_SPEED)
+            for platform in self.platforms:
+                platform.drop(delta)
 
-            # 移除掉出屏幕的平台和弹簧
-            def rfind(iterable):
-                for i, e in enumerate(reversed(iterable)):
-                    if e.pos.y > HEIGHT:
-                        return iterable[-i:]
-                return iterable
-
-            self.platforms, self.springs = map(rfind, (self.platforms, self.springs))
+            # 移除掉出屏幕的平台
+            for i, platform in enumerate(reversed(self.platforms)):
+                if platform.pos.y > HEIGHT:
+                    self.platforms = self.platforms[-i:]
 
             # 在上方新增平台
             y = self.platforms[-1].pos.y - 60
             if y >= -60:
-                self.add_platform_and_spring(y)
+                self.add_platform(y)
 
             # 玩家掉出屏幕重新开始
             if self.player.rect.top > HEIGHT:
