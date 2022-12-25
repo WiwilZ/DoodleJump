@@ -119,6 +119,8 @@ class Platform(Entity):
         self.rect.midtop = self.pos
         if self.type == 3:
             self.spring.update()
+        if self.is_broken:
+            self.pos.y += 10
 
     def is_collide_with(self, player: Player):
         if self.type == 2:
@@ -164,8 +166,8 @@ class Spring(Entity):
 
 class Game:
     FPS = 60
-    SPEED_UP = 0.05
-    MAX_SPEED = 4.0
+    SPEED_UP = 0.03
+    MAX_SPEED = 6.0
 
     def __init__(self):
         self.clock = pygame.time.Clock()
@@ -245,9 +247,9 @@ class Game:
                 platform.drop(delta)
 
             # 移除掉出屏幕的平台
-            for i, platform in enumerate(reversed(self.platforms)):
-                if platform.pos.y > HEIGHT:
-                    self.platforms = self.platforms[-i:]
+            for i in range(len(self.platforms) - 1, -1, -1):
+                if self.platforms[i].pos.y > HEIGHT:
+                    self.platforms.pop(i)
 
             # 在上方新增平台
             y = self.platforms[-1].pos.y - 60
