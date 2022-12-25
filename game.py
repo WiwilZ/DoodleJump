@@ -16,6 +16,8 @@ pygame.display.set_caption("Doodle Jump")
 jump_sound = pygame.mixer.Sound('assets/sound/jump.wav')
 high_jump_sound = pygame.mixer.Sound('assets/sound/highJump2.wav')
 death_sound = pygame.mixer.Sound('assets/sound/death.wav')
+coin_sound = pygame.mixer.Sound('assets/sound/getCoin.wav')
+broke_sound = pygame.mixer.Sound('assets/sound/break.mp3')
 
 # 字体
 font = pygame.freetype.Font("assets/font/al-seana.ttf", 36)
@@ -35,8 +37,6 @@ class Entity:
 
     def update(self):
         pass
-
-
 class Background(Entity):
     def __init__(self):
         surf = pygame.Surface((WIDTH, HEIGHT))
@@ -47,11 +47,11 @@ class Background(Entity):
             pygame.draw.line(surf, (240, 230, 140), (0, i), (WIDTH, i))
         super().__init__(surf)
 
-
 class Player(Entity):
     images = [load_image(f"player/{name}") for name in ('idle_left', 'idle_right', 'jump_left', 'jump_right')]
     width, height = images[0].get_size()
-    ACC = Vector2(0, 0.7)
+    ACC = Vector2(0, 0.6)
+    H_SPEED = 6
     INITIAL_SPEED_Y = 15
 
     def __init__(self, pos: Vector2):
@@ -66,10 +66,10 @@ class Player(Entity):
     def update(self):
         pressed_keys = pygame.key.get_pressed()
         if pressed_keys[K_LEFT] or pressed_keys[K_a]:
-            self.vel.x = -5
+            self.vel.x = -self.H_SPEED
             self.direction = 0
         elif pressed_keys[K_RIGHT] or pressed_keys[K_d]:
-            self.vel.x = 5
+            self.vel.x = self.H_SPEED
             self.direction = 1
         else:
             self.vel.x = 0
@@ -88,7 +88,6 @@ class Player(Entity):
             self.surf = self.images[1 if self.vel.y < 0 else 3]
         self.rect.midbottom = self.pos
         self.stay = False
-
 
 class Platform(Entity):
     images = [load_image(f"platform/{name}") for name in ('green', 'blue', 'red', 'broken')]
@@ -144,7 +143,6 @@ class Platform(Entity):
         self.surf = self.images[3]
         self.rect = self.surf.get_rect()
 
-
 class Spring(Entity):
     images = [load_image(f"spring/{name}") for name in ('idle', 'released')]
     width, height = images[0].get_size()
@@ -163,28 +161,53 @@ class Spring(Entity):
         self.surf = self.images[1]
         self.rect = self.surf.get_rect()
 
+class Coin(Entity):
+    image = load_image("others/coin")
+    width, height = image.get_size()
+
+    def __init__(self, pos: Vector2, target : Platform):
+        super().__init__(self.image)
+        self.pos = pos
+        self.rect.midbottom = self.pos
+        self.target = target
+        self.delta = self.pos.x - self.target.pos.x
+
+    def update(self):
+        self.pos = self.target.pos + (self.delta, 0)
+        self.rect.midbottom = self.pos
+    
+    def is_collide_with(self, player: Player):
+        return (abs(player.pos.x - self.pos.x) < (Player.width + Coin.width) / 2
+                and abs(player.pos.y - self.pos.y) < (Player.height + Coin.height) / 2)
 
 class Game:
     FPS = 60
     SPEED_UP = 0.03
     MAX_SPEED = 6.0
+    STEP = 70       # 平台上下生成间距
 
     def __init__(self):
         self.clock = pygame.time.Clock()
         self.background = Background()
 
     def reset(self):
+        self.score = 0
         self.level = 0
         self.platform_level = 1
         self.player = Player(Vector2(WIDTH / 2, HEIGHT - 50))
         self.platforms = []
+        self.coins = []
 
     def add_platform(self, y: float):
         x = random.uniform(math.ceil(Platform.width / 2), math.floor(WIDTH - Platform.width / 2))
         # 绿、蓝、红、弹簧按10 : 4 : 3 : 2的概率生成平台
         platform_type = random.choice([0] * 10 + [1] * 4 + [2] * 3 + [3] * 2)
-        self.platforms.append(Platform(Vector2(x, y), platform_type, self.platform_level))
+        plantform = Platform(Vector2(x, y), platform_type, self.platform_level)
+        self.platforms.append(plantform)
         self.platform_level += 1
+        if (platform_type != 3 and random.randint(0, 9) >= 8):
+            x = random.uniform(-Platform.width / 2 + 1, Platform.width / 2 - 1)
+            self.coins.append(Coin(Vector2(plantform.pos.x + x, y), plantform))
 
     def detect_collision(self):
         for platform in self.platforms:
@@ -193,6 +216,7 @@ class Game:
                     if platform.is_broken:
                         continue
                     platform.set_broken()
+                    pygame.mixer.Sound.play(broke_sound)
                 elif platform.type == 3:
                     if not platform.spring.is_released:
                         self.player.vel.y = -Player.INITIAL_SPEED_Y * 1.4
@@ -206,6 +230,12 @@ class Game:
                 self.player.stay = True
                 pygame.mixer.Sound.play(jump_sound)
 
+        for i in range(len(self.coins) - 1, -1, -1):
+            if self.coins[i].is_collide_with(self.player):
+                self.score += 1
+                self.coins.pop(i)
+                pygame.mixer.Sound.play(coin_sound)
+
     def run(self):
         self.reset()
         # 第一个平台位于角色出生位置
@@ -216,7 +246,7 @@ class Game:
         pygame.mixer.music.play(-1)
 
         # 生成上面的平台
-        for y in range(int(self.player.pos.y - 60), 0, -60):
+        for y in range(int(self.player.pos.y - self.STEP), 0, -self.STEP):
             self.add_platform(y)
 
         while True:
@@ -225,12 +255,12 @@ class Game:
                     pygame.quit()
                     sys.exit()
 
-            for e in chain((self.background, self.player), self.platforms):
+            for e in chain((self.background, self.player), self.platforms, self.coins):
                 e.update()
                 e.draw(display_surface)
 
             # 显示得分
-            font.render_to(display_surface, (450, 30), f"Score: {self.level}", fgcolor=(0, 0, 0), size=30)
+            font.render_to(display_surface, (450, 30), f"Score: {self.score * 10 + self.level}", fgcolor=(0, 0, 0), size=30)
 
             self.detect_collision()
 
@@ -250,10 +280,12 @@ class Game:
             for i in range(len(self.platforms) - 1, -1, -1):
                 if self.platforms[i].pos.y > HEIGHT:
                     self.platforms.pop(i)
-
+            for i in range(len(self.coins) - 1, -1, -1):
+                if self.coins[i].pos.y > HEIGHT:
+                    self.coins.pop(i)
             # 在上方新增平台
-            y = self.platforms[-1].pos.y - 60
-            if y >= -60:
+            y = self.platforms[-1].pos.y - self.STEP
+            if y >= -self.STEP:
                 self.add_platform(y)
 
             # 玩家掉出屏幕重新开始
