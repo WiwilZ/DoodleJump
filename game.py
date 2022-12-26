@@ -7,6 +7,11 @@ import pygame
 from pygame.locals import *
 from pygame.math import Vector2
 
+
+def load_image(filepath):
+    return pygame.image.load(f"assets/image/{filepath}.png").convert_alpha()
+
+
 WIDTH, HEIGHT = 600, 800
 pygame.init()
 display_surface = pygame.display.set_mode((WIDTH, HEIGHT), pygame.DOUBLEBUF, vsync=1)
@@ -17,14 +22,10 @@ jump_sound = pygame.mixer.Sound('assets/sound/jump.wav')
 high_jump_sound = pygame.mixer.Sound('assets/sound/highJump2.wav')
 death_sound = pygame.mixer.Sound('assets/sound/death.wav')
 coin_sound = pygame.mixer.Sound('assets/sound/getCoin.wav')
-broke_sound = pygame.mixer.Sound('assets/sound/break.mp3')
+break_sound = pygame.mixer.Sound('assets/sound/break.mp3')
 
 # 字体
 font = pygame.freetype.Font("assets/font/al-seana.ttf", 36)
-
-
-def load_image(filepath):
-    return pygame.image.load(f"assets/image/{filepath}.png").convert_alpha()
 
 
 class Entity:
@@ -223,7 +224,7 @@ class Game:
                     if platform.is_broken:
                         continue
                     platform.set_broken()
-                    pygame.mixer.Sound.play(broke_sound)
+                    pygame.mixer.Sound.play(break_sound)
                 elif platform.type == 3:
                     if not platform.spring.is_released:
                         self.player.vel.y = -Player.INITIAL_SPEED_Y * 1.4
